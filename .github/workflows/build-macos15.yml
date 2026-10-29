@@ -1,0 +1,70 @@
+name: Build for macOS 14/15
+
+# Builds the 1.2.0-based memory guard version (macOS 14 and 15) as an
+# ad-hoc signed universal app and publishes it as a GitHub release.
+
+on:
+  push:
+    branches: ["macos15-memory-guard"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # 1.2.0 was built with Xcode 26.2; use it when present, otherwise the newest Xcode 26.
+      - name: Select Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          xcode=$(ls -d /Applications/Xcode_26.2*.app 2>/dev/null | head -n 1)
+          if [ -z "$xcode" ]; then
+            xcode=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n 1)
+          fi
+          if [ -z "$xcode" ]; then
+            echo "No Xcode 26 found on this runner" >&2
+            exit 1
+          fi
+          sudo xcode-select -s "$xcode/Contents/Developer"
+          xcodebuild -version
+
+      - name: Build
+        run: |
+          xcodebuild -project Thaw.xcodeproj \
+            -scheme Thaw \
+            -destination 'generic/platform=macOS' \
+            -configuration Release \
+            -derivedDataPath build \
+            MACOSX_DEPLOYMENT_TARGET=14.0 \
+            ONLY_ACTIVE_ARCH=NO \
+            ENABLE_HARDENED_RUNTIME=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      # No Developer ID here, so sign ad-hoc: Apple Silicon refuses to run unsigned code.
+      - name: Sign and package
+        run: |
+          app=build/Build/Products/Release/Thaw.app
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          lipo -archs "$app/Contents/MacOS/Thaw"
+          vtool -show-build "$app/Contents/MacOS/Thaw" | grep -E "minos|platform"
+          ditto -c -k --keepParent "$app" Thaw-macOS15.zip
+          ls -l Thaw-macOS15.zip
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="1.2.0-memguard.${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" Thaw-macOS15.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Thaw $tag (macOS 14/15)" \
+            --notes "Thaw 1.2.0 with a memory guard and detached icon crops. Built from ${GITHUB_SHA}. Ad-hoc signed: on first launch, allow it in System Settings > Privacy & Security."

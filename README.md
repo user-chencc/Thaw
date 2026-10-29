@@ -19,6 +19,14 @@ Thaw is a powerful menu bar management tool. While its primary function is hidin
 > **Thaw** is a fork of [Ice](https://github.com/jordanbaird/Ice) by Jordan Baird.
 > As the original project appears to be inactive, Thaw aims to keep the project alive fixing bugs, ensuring compatibility with the latest macOS releases, and eventually implementing the remaining roadmap features.
 
+> [!IMPORTANT]
+> **This branch (`macos15-memory-guard`) is a modified Thaw 1.2.0 for macOS 14 and 15.**
+> Changes from upstream 1.2.0:
+> - **Memory guard:** if Thaw's memory footprint stays above 300 MB, it quits and relaunches itself while you are idle and no Thaw window is open (not within 30 minutes of launch, at most once every two hours). Turn it off with `defaults write com.stonerl.Thaw MemoryGuardEnabled -bool false`, or change the limit with `defaults write com.stonerl.Thaw MemoryGuardLimitMB -int 400`.
+> - **Detached icon crops:** cached menu bar item images no longer keep the whole composite capture they were cropped from alive (ported from Thaw 2.x).
+>
+> Builds come from `.github/workflows/build-macos15.yml` and are ad-hoc signed.
+
 ## Install
 
 ### Manual Installation

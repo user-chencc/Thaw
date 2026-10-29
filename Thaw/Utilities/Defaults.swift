@@ -171,6 +171,7 @@ extension Defaults {
         static let showMenuBarTooltips = false
         static let iconRefreshInterval: TimeInterval = 0.5
         static let enableDiagnosticLogging = false
+        static let memoryGuardLimitMB = 300
 
         // MARK: Hotkeys Settings
 
@@ -223,6 +224,9 @@ extension Defaults {
         case iconRefreshInterval = "IconRefreshInterval"
         case showMenuBarTooltips = "ShowMenuBarTooltips"
         case enableDiagnosticLogging = "EnableDiagnosticLogging"
+        case memoryGuardEnabled = "MemoryGuardEnabled"
+        case memoryGuardLimitMB = "MemoryGuardLimitMB"
+        case memoryGuardLastRestart = "MemoryGuardLastRestart"
 
         // MARK: Internal
 

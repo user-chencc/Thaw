@@ -71,6 +71,9 @@ final class AppState: ObservableObject {
     /// Prevent repeated restart attempts.
     private var isRestarting = false
 
+    /// When this instance launched, used by the memory guard.
+    private let launchDate = Date()
+
     /// Diagnostic logger for the app state.
     let diagLog = DiagLog(category: "AppState")
 
@@ -152,12 +155,98 @@ final class AppState: ObservableObject {
                         diagLog.warning("Many open windows: \(windowCount)")
                     }
 
+                    if restartIfMemoryGuardTriggered(footprint: memoryUsage) {
+                        return
+                    }
+
                     try await Task.sleep(for: .seconds(300))
                 }
             } catch {
                 // CancellationError — task was cancelled, exit cleanly.
             }
         }
+    }
+
+    /// Quits and relaunches Thaw when its memory footprint is above the
+    /// memory guard limit, the same as quitting and reopening it by hand.
+    ///
+    /// Only restarts while the user is idle and no Thaw UI is open, never
+    /// within 30 minutes of launch, and at most once every two hours.
+    /// Defaults: `MemoryGuardEnabled` (default on), `MemoryGuardLimitMB`.
+    ///
+    /// - Returns: `true` if a restart was started.
+    private func restartIfMemoryGuardTriggered(footprint: Int64) -> Bool {
+        let isEnabled = Defaults.object(forKey: .memoryGuardEnabled) as? Bool ?? true
+        guard isEnabled else {
+            return false
+        }
+
+        let configuredLimitMB = Defaults.integer(forKey: .memoryGuardLimitMB)
+        let limitMB = configuredLimitMB > 0 ? configuredLimitMB : Defaults.DefaultValue.memoryGuardLimitMB
+        guard footprint > Int64(limitMB) * 1024 * 1024 else {
+            return false
+        }
+
+        guard Date().timeIntervalSince(launchDate) >= 30 * 60 else {
+            return false
+        }
+
+        let lastRestart = Defaults.double(forKey: .memoryGuardLastRestart)
+        guard Date().timeIntervalSince1970 - lastRestart >= 2 * 60 * 60 else {
+            diagLog.warning("Memory guard: \(footprint / 1024 / 1024)MB is over the \(limitMB)MB limit, but Thaw restarted less than 2 hours ago")
+            return false
+        }
+
+        guard !navigationState.isIceBarPresented,
+              !navigationState.isSearchPresented,
+              !navigationState.isSettingsPresented,
+              !isDraggingMenuBarItem
+        else {
+            return false
+        }
+
+        let stateID = CGEventSourceStateID.combinedSessionState
+        let idleSeconds = [CGEventType.mouseMoved, .leftMouseDown, .rightMouseDown, .scrollWheel, .keyDown]
+            .map { CGEventSource.secondsSinceLastEventType(stateID, eventType: $0) }
+            .min() ?? 0
+        guard idleSeconds >= 60 else {
+            return false
+        }
+
+        diagLog.warning("Memory guard: \(footprint / 1024 / 1024)MB is over the \(limitMB)MB limit, restarting Thaw")
+        Defaults.set(Date().timeIntervalSince1970, forKey: .memoryGuardLastRestart)
+        relaunchAfterExit()
+        return true
+    }
+
+    /// Quits, then starts a new instance once this one has fully exited.
+    ///
+    /// Unlike ``restartSelf()``, the new instance waits for this one to finish
+    /// its termination cleanup, so two instances never manage the menu bar at once.
+    private func relaunchAfterExit() {
+        guard !isRestarting else {
+            return
+        }
+        isRestarting = true
+
+        imageCache.saveToDisk()
+
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let relauncher = Process()
+        relauncher.executableURL = URL(fileURLWithPath: "/bin/sh")
+        relauncher.arguments = [
+            "-c",
+            "while /bin/kill -0 \(pid) 2>/dev/null; do /bin/sleep 0.5; done; /usr/bin/open -g \"$0\"",
+            Bundle.main.bundleURL.path,
+        ]
+        do {
+            try relauncher.run()
+        } catch {
+            diagLog.error("Memory guard: failed to start relauncher: \(error.localizedDescription)")
+            isRestarting = false
+            return
+        }
+        NSApp.terminate(nil)
     }
 
     /// Dismisses the window with the given identifier.
